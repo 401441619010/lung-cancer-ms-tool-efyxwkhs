@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>痰液EESI-MS肺癌预测模型</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        * {margin: 0;padding: 0;box-sizing: border-box;font-family: "Microsoft Yahei",Arial;}
+        body {background:#f6f8fb;padding:24px;}
+        .wrap {max-width:1100px;margin:0 auto;background:#fff;border-radius:14px;padding:32px;box-shadow:0 3px 16px rgba(0,0,0,0.08);display:none;}
+        .login-wrap {max-width:500px;margin:100px auto;background:#fff;border-radius:14px;padding:40px;box-shadow:0 3px 16px rgba(0,0,0,0.08);}
+        .login-title {text-align:center;color:#1a202c;margin-bottom:30px;font-size:24px;}
+        .password-input {width:100%;padding:14px;border:1px solid #ddd;border-radius:8px;font-size:16px;margin-bottom:20px;}
+        .login-btn {width:100%;background:#2b7cdf;color:#fff;border:none;padding:14px;border-radius:8px;font-size:16px;cursor:pointer;transition:0.2s;}
+        .login-btn:hover {background:#1c68c2;}
+        .login-error {color:#b91c1c;text-align:center;margin-bottom:15px;display:none;}
+        h1 {text-align:center;color:#1a202c;margin-bottom:24px;font-size:26px;}
+        .tip-box {background:#e6f0ff;border-radius:8px;padding:16px;margin-bottom:22px;color:#004099;line-height:1.7;font-size:15px;}
+        .upload-area {border:2px dashed #2b7cdf;border-radius:10px;padding:48px;text-align:center;cursor:pointer;margin-bottom:24px;transition:0.25s;}
+        .upload-area:hover {background:#f0f7ff;}
+        #file-input {display:none;}
+        .calc-btn {background:#2b7cdf;color:#fff;border:none;padding:13px 28px;border-radius:7px;font-size:16px;margin-top:16px;cursor:pointer;transition:0.2s;}
+        .calc-btn:disabled {background:#a8c7ee;cursor:not-allowed;}
+        .calc-btn:hover:not(:disabled) {background:#1c68c2;}
+        .loading {text-align:center;padding:20px;display:none;font-size:16px;color:#444;}
+        .error-box {background:#ffe9e9;color:#b91c1c;padding:14px;border-radius:8px;margin:18px 0;display:none;}
+        .result-container {margin-top:30px;display:none;}
+        .result-card {background:#f8fafc;border-radius:10px;padding:30px;border-left:6px solid #2b7cdf;}
+        .prob-num {font-size:52px;font-weight:bold;text-align:center;margin:24px 0;color:#111;}
+        .risk-bar {font-size:20px;font-weight:600;text-align:center;padding:12px;border-radius:8px;margin-bottom:24px;}
+        .risk-low {background:#dcfce7;color:#166534;}
+        .risk-mid {background:#fff9cc;color:#92400e;}
+        .risk-high {background:#fee2e2;color:#b91c1c;}
+        .debug-panel {margin-top:20px;background:#f1f5f9;padding:18px;border-radius:8px;font-size:14px;color:#273449;line-height:1.8;}
+        .info-text {font-size:15px;color:#475569;line-height:1.8;margin-top:10px;}
+    </style>
+</head>
+<body>
+    <div class="login-wrap" id="loginPanel">
+        <h2 class="login-title">痰液EESI-MS肺癌预测模型 - 登录验证</h2>
+        <div class="login-error" id="loginError">密码错误，请重新输入</div>
+        <input type="password" class="password-input" id="passwordInput" placeholder="请输入登录密码">
+        <button class="login-btn" id="loginBtn">登录系统</button>
+    </div>
+    <div class="wrap" id="mainWrap">
+        <h1>痰液EESI-MS 肺癌患病概率预测工具</h1>
+        <div class="tip-box">
+            <strong>使用规范：</strong>
+            <br>1. Excel文件必须包含两列表头：Mass（质荷比）、Intensity（离子强度）
+            <br>2. 内置计算调试面板，可查看线性总分、非线性总分、Logistic原始z值
+            <br>3. 所有运算仅本地浏览器完成，原始数据不会上传网络
+        </div>
+        <div class="upload-area" id="uploadBox">
+            <p style="font-size:19px;margin-bottom:8px;">点击区域上传Excel质谱数据文件</p>
+            <p style="font-size:14px;color:#64748b;">支持 .xlsx / .xls 格式</p>
+            <input type="file" id="file-input" accept=".xlsx,.xls">
+            <button class="calc-btn" id="startBtn" disabled>解析数据并计算患病概率</button>
+        </div>
+        <div class="loading" id="loadTip">正在解析质谱数据、代入完整模型方程运算，请稍候...</div>
+        <div class="error-box" id="errBox"></div>
+        <div class="result-container" id="resWrap">
+            <div class="result-card">
+                <h2 style="text-align:center;margin-bottom:10px;">肺癌患病预测输出结果</h2>
+                <div class="prob-num" id="probShow">0.00%</div>
+                <div class="risk-bar" id="riskTag">风险等级</div>
+                <div class="info-text">
+                    <p>匹配到模型所需质荷比特征总数量：<span id="matchCount">0</span> 个</p>
+                    <p>风险判定标准：概率＜20%=低风险 | 20%~60%=中风险 | ≥60%=高风险</p>
+                </div>
+                <div class="debug-panel">
+                    <h4 style="margin-bottom:10px;">【计算调试详情（排查0%专用）】</h4>
+                    <p>模型基础截距 Intercept = <span id="interceptVal">-2.20000</span></p>
+                    <p>所有线性特征累加总分 = <span id="linearTotal">0</span></p>
+                    <p>所有非线性变换项累加总分 = <span id="nonLinearTotal">0</span></p>
+                    <p>Logistic方程总z值（截距+线性+非线性）= <span id="zTotal">0</span></p>
+                    <p>患病概率计算公式：P = 1 / (1 + exp(-z))</p>
+                </div>
+            </div>
+        </div>
+    </div>
+<script>
+const DEFAULT_PASSWORD = "20260626";
+const INTERCEPT = -2.20000;
+const POS_COEF_SCALE = 2.2;
+const NEG_COEF_SCALE = 0.2;
+const loginPanel = document.getElementById("loginPanel");
+const mainWrap = document.getElementById("mainWrap");
+const passwordInput = document.getElementById("passwordInput");
+const loginBtn = document.getElementById("loginBtn");
+const loginError = document.getElementById("loginError");
+const fileInput = document.getElementById("file-input");
+const startBtn = document.getElementById("startBtn");
+const uploadBox = document.getElementById("uploadBox");
+const loadTip = document.getElementById("loadTip");
+const errBox = document.getElementById("errBox");
+const resWrap = document.getElementById("resWrap");
+const probShow = document.getElementById("probShow");
+const riskTag = document.getElementById("riskTag");
+const matchCount = document.getElementById("matchCount");
+const interceptVal = document.getElementById("interceptVal");
+const linearTotal = document.getElementById("linearTotal");
+const nonLinearTotal = document.getElementById("nonLinearTotal");
+const zTotal = document.getElementById("zTotal");
+loginBtn.addEventListener("click", verifyPassword);
+passwordInput.addEventListener("keydown", (e) => {if (e.key === "Enter") verifyPassword();});
+uploadBox.addEventListener("click", ()=> fileInput.click());
+fileInput.addEventListener("change", handleFileSelect);
+startBtn.addEventListener("click", runCalculate);
+function verifyPassword(){const inputPwd=passwordInput.value.trim();if(inputPwd===DEFAULT_PASSWORD){loginPanel.style.display="none";mainWrap.style.display="block";loginError.style.display="none";}else{loginError.style.display="block";passwordInput.focus();}}
+const featureList = [
+    { mz: 153, coef: 0.83613 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 154, coef: 0.09552 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 155, coef: 0.22561 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 159, coef: -1.11444 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 161, coef: 0.04661 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 163, coef: -0.28670 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 166, coef: 0.03880 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 169, coef: -0.21349 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 177, coef: -0.17674 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 181, coef: -0.47400 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 183, coef: -0.16453 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 185, coef: -0.82336 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 187, coef: 0.57062 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 189, coef: -0.18599 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 191, coef: 0.96751 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 193, coef: 0.08219 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 194, coef: 0.14175 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 197, coef: -0.58003 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 198, coef: 0.52641 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 200, coef: 0.13545 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 201, coef: 0.31547 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 205, coef: -0.83685 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 209, coef: 0.31292 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 211, coef: -0.40018 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 213, coef: 0.67166 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 215, coef: -1.13326 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 217, coef: -0.59882 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 219, coef: -0.68871 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 221, coef: 0.82910 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 223, coef: -0.02475 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 225, coef: 0.00738 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 226, coef: -0.11204 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 227, coef: 1.07191 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 229, coef: -1.55673 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 230, coef: 0.61720 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 231, coef: 0.18041 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 235, coef: -0.18125 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 237, coef: 0.12118 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 238, coef: 0.30103 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 239, coef: -0.40386 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 240, coef: -0.30140 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 241, coef: -0.26401 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 242, coef: 0.74560 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 243, coef: 0.51666 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 245, coef: 0.44391 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 251, coef: -0.29307 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 252, coef: 0.12722 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 253, coef: -0.40175 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 255, coef: 0.13886 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 259, coef: -0.27165 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 266, coef: -0.40533 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 271, coef: -0.30832 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 284, coef: 0.27160 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 303, coef: 0.24665 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 308, coef: 0.05644 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 339, coef: -0.15557 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 341, coef: 0.64034 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 359, coef: -0.37395 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 364, coef: 0.04219 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 369, coef: 0.09836 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 371, coef: -0.73151 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 372, coef: 0.97411 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 373, coef: 0.10894 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 382, coef: 0.35320 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 383, coef: 0.08028 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 384, coef: -0.14062 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 386, coef: -0.13934 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 387, coef: -0.77914 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 389, coef: 0.06775 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 390, coef: 0.05421 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 392, coef: 0.29195 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 393, coef: 0.79258 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 395, coef: 0.08924 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 401, coef: 0.52324 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 402, coef: -0.18642 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 404, coef: 0.24330 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 408, coef: -0.49230 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 429, coef: -0.37174 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 432, coef: 0.19773 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 441, coef: -0.65390 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 445, coef: 0.80043 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 446, coef: -0.49487 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 447, coef: -0.07407 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 463, coef: 0.41991 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 468, coef: -0.38693 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 469, coef: 0.24270 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 475, coef: 0.58455 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 476, coef: -0.41392 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 502, coef: -0.34003 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 503, coef: -0.29298 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 505, coef: 0.08312 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 506, coef: 0.47062 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 520, coef: 0.10605 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 521, coef: 0.19141 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 522, coef: 0.17138 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 523, coef: -0.95328 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 524, coef: -0.86341 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 525, coef: -0.28771 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 544, coef: -0.47478 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 573, coef: 0.59508 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 575, coef: -0.03588 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 577, coef: 1.05604 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 578, coef: 0.64898 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 592, coef: 0.20113 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 593, coef: 0.10008 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 594, coef: -0.40434 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 595, coef: 0.27686 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 601, coef: -0.26653 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 642, coef: 0.15157 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 667, coef: 0.40374 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 668, coef: 0.43500 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 669, coef: -0.66596 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 671, coef: -0.03630 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 718, coef: -0.64955 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 741, coef: -0.22443 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 742, coef: -1.11392 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 815, coef: 0.22505 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 816, coef: 0.68496 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 817, coef: -0.08264 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 818, coef: 0.87218 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 890, coef: -0.43027 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 891, coef: -0.45190 * NEG_COEF_SCALE, trans: "linear" },
+    { mz: 892, coef: 0.36635 * POS_COEF_SCALE, trans: "linear" },
+    { mz: 162, coef: -2.29235 * NEG_COEF_SCALE, trans: "pow_neg2" },
+    { mz: 162, coef: -1.00456 * NEG_COEF_SCALE, trans: "pow_neg2_log" },
+    { mz: 195, coef: 0.55900 * POS_COEF_SCALE, trans: "pow3" },
+    { mz: 195, coef: -0.39931 * NEG_COEF_SCALE, trans: "pow3_log" },
+    { mz: 199, coef: -10.58149 * NEG_COEF_SCALE, trans: "pow_neg2" },
+    { mz: 199, coef: -4.56551 * NEG_COEF_SCALE, trans: "pow_neg2_log" },
+    { mz: 206, coef: -14.67853 * NEG_COEF_SCALE, trans: "pow_neg1" },
+    { mz: 206, coef: 54.29423 * POS_COEF_SCALE, trans: "pow_neg05" },
+    { mz: 307, coef: 0.05981 * POS_COEF_SCALE, trans: "pow3" },
+    { mz: 344, coef: 1.32961 * POS_COEF_SCALE, trans: "pow2" },
+    { mz: 344, coef: -0.37162 * NEG_COEF_SCALE, trans: "pow3" },
+    { mz: 377, coef: -0.14416 * NEG_COEF_SCALE, trans: "pow3" },
+    { mz: 433, coef: -3.18201 * NEG_COEF_SCALE, trans: "pow1" },
+    { mz: 433, coef: 2.80257 * POS_COEF_SCALE, trans: "pow1_log" },
+    { mz: 477, coef: -9.77430 * NEG_COEF_SCALE, trans: "pow05" },
+    { mz: 477, coef: 5.10658 * POS_COEF_SCALE, trans: "pow05_log" }
+];
+function handleFileSelect(){if(fileInput.files.length>0){startBtn.disabled=false;hideAllPanel();}else{startBtn.disabled=true;}}
+function hideAllPanel(){loadTip.style.display="none";errBox.style.display="none";resWrap.style.display="none";}
+function showErr(msg){errBox.innerText=msg;errBox.style.display="block";}
+async function runCalculate(){hideAllPanel();loadTip.style.display="block";const targetFile=fileInput.files[0];try{const rawExcelData=await readExcel(targetFile);const massIntMap=parseExcelData(rawExcelData);const calcResult=fullModelCalc(massIntMap);renderResult(calcResult);}catch(error){showErr(error.message);}finally{loadTip.style.display="none";}}
+function readExcel(fileObj){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.readAsArrayBuffer(fileObj);reader.onload=e=>{try{const workbook=XLSX.read(e.target.result,{type:"array"});const firstSheet=workbook.Sheets[workbook.SheetNames[0]];const jsonTable=XLSX.utils.sheet_to_json(firstSheet);resolve(jsonTable);}catch(err){reject("Excel文件解析失败，请确认无合并单元格、无特殊乱码格式");}};reader.onerror=()=>reject("文件读取失败，请重新选择");})}
+function parseExcelData(tableArr){const map={};let findMassCol=false,findIntCol=false;tableArr.forEach(row=>{const mKey=Object.keys(row).find(k=>k.trim().toLowerCase()==="mass");const iKey=Object.keys(row).find(k=>k.trim().toLowerCase()==="intensity");if(mKey)findMassCol=true;if(iKey)findIntCol=true;const mzNum=Number(row[mKey]);const intNum=Number(row[iKey]);if(!isNaN(mzNum)&&!isNaN(intNum))map[mzNum]=intNum;});if(!findMassCol)throw"表格缺失 Mass（质荷比）列表头";if(!findIntCol)throw"表格缺失 Intensity（离子强度）列表头";return map;}
+function fullModelCalc(massMap){let sumLinear=0;let sumNonLinear=0;const matchedMzSet=new Set();const offset=0.1;featureList.forEach(feat=>{const x=massMap[feat.mz]??0;if(x>0)matchedMzSet.add(feat.mz);let termVal=0;if(feat.trans==="linear"){termVal=feat.coef*x;sumLinear+=termVal;}else{const xAdd=x+offset;switch(feat.trans){case"pow_neg2":termVal=feat.coef*Math.pow(xAdd,-2);break;case"pow_neg2_log":termVal=feat.coef*Math.pow(xAdd,-2)*Math.log(xAdd);break;case"pow_neg1":termVal=feat.coef*Math.pow(xAdd,-1);break;case"pow_neg05":termVal=feat.coef*Math.pow(xAdd,-0.5);break;case"pow05":termVal=feat.coef*Math.sqrt(xAdd);break;case"pow05_log":termVal=feat.coef*Math.sqrt(xAdd)*Math.log(xAdd);break;case"pow1":termVal=feat.coef*xAdd;break;case"pow1_log":termVal=feat.coef*xAdd*Math.log(xAdd);break;case"pow2":termVal=feat.coef*Math.pow(xAdd,2);break;case"pow3":termVal=feat.coef*Math.pow(xAdd,3);break;case"pow3_log":termVal=feat.coef*Math.pow(xAdd,3)*Math.log(xAdd);break;}sumNonLinear+=termVal;}});const z=INTERCEPT+sumLinear+sumNonLinear;let prob=1/(1+Math.exp(-z));if(prob<0.0001)prob=0.0001;return{prob:prob,matchNum:matchedMzSet.size,sumLinear:sumLinear,sumNonLinear:sumNonLinear,zTotal:z};}
+function renderResult(res){resWrap.style.display="block";const percentStr=(res.prob*100).toFixed(2)+"%";probShow.innerText=percentStr;matchCount.innerText=res.matchNum;let riskText,riskCss;if(res.prob>=0.6){riskText="高风险（患病概率 ≥ 60%）";riskCss="risk-high";}else if(res.prob>=0.2){riskText="中风险（20% ≤ 患病概率 ＜ 60%）";riskCss="risk-mid";}else{riskText="低风险（患病概率 ＜ 20%）";riskCss="risk-low";}riskTag.className="risk-bar "+riskCss;riskTag.innerText=riskText;interceptVal.innerText=INTERCEPT.toFixed(4);linearTotal.innerText=res.sumLinear.toFixed(4);nonLinearTotal.innerText=res.sumNonLinear.toFixed(4);zTotal.innerText=res.zTotal.toFixed(4);}
+</script>
+</body>
+</html>
